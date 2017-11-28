@@ -928,6 +928,8 @@ func (h *Server) PostLocal(ctx context.Context, arg chat1.PostLocalArg) (res cha
 		return chat1.PostLocalRes{}, err
 	}
 
+	RecordChatSend(h.G())
+
 	return chat1.PostLocalRes{
 		RateLimits:       utils.AggRateLimitsP([]*chat1.RateLimit{rl}),
 		MessageID:        msgBoxed.GetMessageID(),
@@ -1095,6 +1097,8 @@ func (h *Server) PostLocalNonblock(ctx context.Context, arg chat1.PostLocalNonbl
 			fmt.Errorf("PostLocalNonblock: unable to send message: err: %s", err.Error())
 	}
 	h.Debug(ctx, "PostLocalNonblock: using outboxID: %s", obid)
+
+	RecordChatSend(h.G())
 
 	return chat1.PostLocalNonblockRes{
 		OutboxID:         obid,

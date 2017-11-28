@@ -19,6 +19,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/keybase/client/go/protocol/gregor1"
 	"github.com/keybase/go-framed-msgpack-rpc/rpc"
 	jsonw "github.com/keybase/go-jsonw"
 )
@@ -400,6 +401,16 @@ func (u UID) Less(v UID) bool {
 
 func (u UID) AsUserOrTeam() UserOrTeamID {
 	return UserOrTeamID(u)
+}
+
+func (u UID) GregorUID() gregor1.UID {
+	return gregor1.UID(u.ToBytes())
+}
+
+// It would be nice if this was a method on gregor1.UID for consistency, but
+// the circular import rule prevents that.
+func MakeKeybaseUID(uid gregor1.UID) UID {
+	return UID(uid.String())
 }
 
 func TeamIDFromString(s string) (TeamID, error) {

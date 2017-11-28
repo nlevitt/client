@@ -33,7 +33,8 @@ import (
 )
 
 const GregorRequestTimeout time.Duration = 30 * time.Second
-const GregorConnectionRetryInterval time.Duration = 2 * time.Second
+const GregorConnectionShortRetryInterval time.Duration = 2 * time.Second
+const GregorConnectionLongRetryInterval time.Duration = 2 * time.Second
 const GregorGetClientTimeout time.Duration = 4 * time.Second
 
 type IdentifyUIHandler struct {
@@ -1376,6 +1377,37 @@ func (g *gregorHandler) pingLoop() {
 	}
 }
 
+// Our heuristic for figuring out whether your device is "active in chat" is
+// whether you've sent a message in the last month. We're recording your last
+// send as a simple timestamp, and we'll compare that to the current time.
+// However, we want to avoid the situation where we ship this code for the
+// first time, and suddenly *all* devices appear inactive, because no one has
+// written the timestamp yet. So we add a second timestamp, which is the first
+// time you ran any of this code. For 24 hours after the first time a device
+// queries these keys, we treat all devices as active. We'll want to keep
+// (something like) this code even after it's all stable in the wild, because
+// it covers newly provisioned devices too.
+func chatAwareReconnectBackoff(ctx context.Context, g *globals.Context) backoff.BackOff {
+	long := backoff.NewConstantBackOff(GregorConnectionLongRetryInterval)
+	short := backoff.NewConstantBackOff(GregorConnectionShortRetryInterval)
+	now := time.Now()
+	firstQueryTime := chat.TouchFirstChatActiveQueryTime(g)
+
+	// All devices are presumed active for the first 24 hours after they start
+	// checking this, and we give them a short backoff.
+	if now.Sub(firstQueryTime) < chat.InitialAssumedActiveInterval {
+		return short
+	}
+
+	// Otherwise, devices that haven't recorded a send in the last month are
+	// given a long backoff.
+	lastSendTime := chat.GetLastSendTime(g)
+	if now.Sub(lastSendTime) < chat.ActiveIntervalAfterSend {
+		return short
+	}
+	return long
+}
+
 // connMutex must be locked before calling this
 func (g *gregorHandler) connectTLS() error {
 	ctx := context.Background()
@@ -1394,11 +1426,10 @@ func (g *gregorHandler) connectTLS() error {
 	// Let people know we are trying to sync
 	g.G().NotifyRouter.HandleChatInboxSyncStarted(ctx, g.G().Env.GetUID())
 
-	constBackoff := backoff.NewConstantBackOff(GregorConnectionRetryInterval)
 	opts := rpc.ConnectionOpts{
 		TagsFunc:         logger.LogTagsFromContextRPC,
 		WrapErrorFunc:    libkb.MakeWrapError(g.G().ExternalG()),
-		ReconnectBackoff: func() backoff.BackOff { return constBackoff },
+		ReconnectBackoff: func() backoff.BackOff { return chatAwareReconnectBackoff(ctx, g.G()) },
 	}
 	g.conn = rpc.NewTLSConnection(rpc.NewFixedRemote(uri.HostPort),
 		[]byte(rawCA), libkb.NewContextifiedErrorUnwrapper(g.G().ExternalG()), g, libkb.NewRPCLogFactory(g.G().ExternalG()), g.G().Log, opts)
@@ -1431,11 +1462,10 @@ func (g *gregorHandler) connectNoTLS() error {
 	t := newConnTransport(g.G().ExternalG(), uri.HostPort)
 	g.transportForTesting = t
 
-	constBackoff := backoff.NewConstantBackOff(GregorConnectionRetryInterval)
 	opts := rpc.ConnectionOpts{
 		TagsFunc:         logger.LogTagsFromContextRPC,
 		WrapErrorFunc:    libkb.MakeWrapError(g.G().ExternalG()),
-		ReconnectBackoff: func() backoff.BackOff { return constBackoff },
+		ReconnectBackoff: func() backoff.BackOff { return chatAwareReconnectBackoff(ctx, g.G()) },
 	}
 	g.conn = rpc.NewConnectionWithTransport(g, t, libkb.NewContextifiedErrorUnwrapper(g.G().ExternalG()), g.G().Log, opts)
 

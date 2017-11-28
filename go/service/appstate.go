@@ -4,8 +4,6 @@
 package service
 
 import (
-	"fmt"
-
 	"github.com/keybase/client/go/libkb"
 	"github.com/keybase/client/go/protocol/keybase1"
 	"github.com/keybase/go-framed-msgpack-rpc/rpc"
@@ -25,7 +23,7 @@ func newAppStateHandler(xp rpc.Transporter, g *libkb.GlobalContext) *appStateHan
 }
 
 func (a *appStateHandler) UpdateAppState(ctx context.Context, state keybase1.AppState) (err error) {
-	a.G().Trace(fmt.Sprintf("UpdateAppState(%v)", state), func() error { return err })()
+	a.G().Log.Errorf("UpdateAppState(%v)", state)
 
 	// Update app state
 	a.G().AppState.Update(state)
